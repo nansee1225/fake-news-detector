@@ -1,228 +1,163 @@
-
 # ======================================================
-# FINAL PREMIUM FAKE NEWS DETECTOR (RICH UI + DATA + NAVBAR)
+# SCROLL-BASED FAKE NEWS DETECTOR (NO NAVBAR SWITCHING)
+# Single Page App with Sections (Smooth Scroll Feel)
 # ======================================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-import requests
-from bs4 import BeautifulSoup
+import random
+import json
+import os
+import matplotlib.pyplot as plt
+from pathlib import Path
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from textblob import TextBlob
-import matplotlib.pyplot as plt
-import random
 
-st.set_page_config(page_title="AI Fake News System", layout="wide")
+st.set_page_config(page_title="Fake News Detector Pro", layout="wide")
 
-# =========================
-# LOGIN
-# =========================
+USER_DB = "users.json"
+
+# ---------------- INIT ----------------
+if not os.path.exists(USER_DB):
+    with open(USER_DB, "w") as f:
+        json.dump({}, f)
+
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+    st.session_state.user = None
 
-if not st.session_state.logged_in:
-    st.markdown("<h1 style='text-align:center;'>🔐 AI System Login</h1>", unsafe_allow_html=True)
-    user = st.text_input("Username")
-    pwd = st.text_input("Password", type="password")
+# ---------------- STYLE ----------------
+st.markdown("""
+<style>
+.big-title {font-size: 42px; font-weight: bold; color: #22c55e; margin-top: 30px;}
+.section {margin-top: 60px; padding: 20px; background: #1f2937; border-radius: 15px;}
+</style>
+""", unsafe_allow_html=True)
 
-    if st.button("Login"):
-        if user == "admin" and pwd == "1234":
-            st.session_state.logged_in = True
-            st.rerun()
+# ---------------- MODEL ----------------
+dataset_path = Path(__file__).resolve().with_name("news_dataset.csv")
+news_data = pd.read_csv(dataset_path)
+required_columns = {"text", "label"}
+if not required_columns.issubset(news_data.columns):
+    raise ValueError("news_dataset.csv must contain 'text' and 'label' columns.")
+
+texts = news_data["text"].fillna("").astype(str).str.strip()
+labels = news_data["label"].fillna("").astype(str).str.strip().str.upper()
+if texts.eq("").any():
+    raise ValueError("news_dataset.csv contains an empty news text.")
+if not labels.isin({"REAL", "FAKE"}).all():
+    raise ValueError("news_dataset.csv labels must be either 'REAL' or 'FAKE'.")
+if labels.nunique() < 2:
+    raise ValueError("news_dataset.csv must contain examples for both labels.")
+
+labels = labels.map({"REAL": 1, "FAKE": 0})
+
+vectorizer = TfidfVectorizer()
+X = vectorizer.fit_transform(texts)
+model = LogisticRegression()
+model.fit(X, labels)
+
+# ---------------- AUTH ----------------
+def load_users():
+    with open(USER_DB, "r") as f:
+        return json.load(f)
+
+def save_users(users):
+    with open(USER_DB, "w") as f:
+        json.dump(users, f)
+
+# ---------------- LOGIN ----------------
+def auth_page():
+    st.markdown("<div class='big-title'>🔐 Login / Signup</div>", unsafe_allow_html=True)
+
+    tab1, tab2 = st.tabs(["Login", "Signup"])
+    users = load_users()
+
+    with tab1:
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
+        if st.button("Login"):
+            if u in users and users[u] == p:
+                st.session_state.logged_in = True
+                st.session_state.user = u
+                st.success("Login successful")
+            else:
+                st.error("Invalid credentials")
+
+    with tab2:
+        u = st.text_input("Create Username")
+        p = st.text_input("Create Password", type="password")
+        if st.button("Signup"):
+            if u in users:
+                st.warning("User exists")
+            else:
+                users[u] = p
+                save_users(users)
+                st.success("Account created")
+
+# ---------------- MAIN PAGE (SCROLL) ----------------
+def main_page():
+
+    st.title(f"👋 Welcome, {st.session_state.user}")
+
+    # -------- HOME --------
+    st.markdown("<div class='big-title'>📰 Home</div>", unsafe_allow_html=True)
+    st.image("https://images.unsplash.com/photo-1504711434969-e33886168f5c", use_container_width=True)
+    st.write("Scroll down to explore features ↓")
+
+    # -------- DASHBOARD --------
+    st.markdown("<div class='section'>", unsafe_allow_html=True)
+    st.markdown("<div class='big-title'>📊 Dashboard</div>", unsafe_allow_html=True)
+
+    real = random.randint(50, 100)
+    fake = random.randint(20, 60)
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total", real + fake)
+    col2.metric("Real", real)
+    col3.metric("Fake", fake)
+
+    df = pd.DataFrame({"Type": ["Real", "Fake"], "Count": [real, fake]})
+    fig, ax = plt.subplots()
+    ax.bar(df["Type"], df["Count"])
+    st.pyplot(fig)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # -------- DETECTOR --------
+    st.markdown("<div class='section'>", unsafe_allow_html=True)
+    st.markdown("<div class='big-title'>🔍 Detector</div>", unsafe_allow_html=True)
+
+    text = st.text_area("Enter news text")
+    if st.button("Analyze"):
+        vec = vectorizer.transform([text])
+        pred = model.predict(vec)[0]
+
+        if pred == 1:
+            st.success("REAL news")
         else:
-            st.error("Wrong credentials")
-    st.stop()
+            st.error("FAKE news")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# =========================
-# MODEL
-# =========================
-def load_model():
-    data = pd.DataFrame({
-        'text': [
-            "Government launches scheme",
-            "Aliens attack earth",
-            "Stock market rises",
-            "Fake miracle cure found"
-        ],
-        'label': [0,1,0,1]
-    })
+    # -------- ANALYTICS --------
+    st.markdown("<div class='section'>", unsafe_allow_html=True)
+    st.markdown("<div class='big-title'>📈 Analytics</div>", unsafe_allow_html=True)
 
-    vec = TfidfVectorizer(stop_words='english')
-    X = vec.fit_transform(data['text'])
-    model = LogisticRegression()
-    model.fit(X, data['label'])
-    return model, vec
-
-model, vec = load_model()
-
-# =========================
-# FUNCTIONS
-# =========================
-def predict(text):
-    v = vec.transform([text])
-    pred = model.predict(v)[0]
-    prob = model.predict_proba(v)[0]
-    return pred, prob
-
-def sentiment(text):
-    p = TextBlob(text).sentiment.polarity
-    return "Positive" if p>0 else "Negative" if p<0 else "Neutral"
-
-def fetch(url):
-    try:
-        r = requests.get(url)
-        soup = BeautifulSoup(r.text,'html.parser')
-        return ' '.join([p.text for p in soup.find_all('p')])
-    except:
-        return ""
-
-# =========================
-# NAVBAR (IMPROVED)
-# =========================
-st.sidebar.title("🚀 Navigation Panel")
-st.sidebar.markdown("---")
-
-page = st.sidebar.radio("Go to", [
-    "🏠 Home",
-    "🔍 Detector",
-    "📊 Dashboard",
-    "📈 Trends",
-    "🧠 Insights",
-    "⚙️ Settings"
-])
-
-st.sidebar.markdown("---")
-st.sidebar.info("AI Fake News Detector v2.0")
-
-# history
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-# =========================
-# HOME
-# =========================
-if page == "🏠 Home":
-    st.markdown("<h1 style='text-align:center;color:#ff4b4b;'>⚡ AI Fake News Detection System</h1>", unsafe_allow_html=True)
-    st.markdown("<h4 style='text-align:center;'>Detect • Analyze • Visualize</h4>", unsafe_allow_html=True)
-
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Users", random.randint(100,500))
-    c2.metric("Articles Checked", len(st.session_state.history))
-    c3.metric("Accuracy", "92%")
-
-    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=200)
-
-# =========================
-# DETECTOR
-# =========================
-elif page == "🔍 Detector":
-    st.header("🔍 News Analyzer")
-
-    col1,col2 = st.columns([2,1])
-
-    with col1:
-        opt = st.radio("Input", ["Text","URL"])
-
-        if opt == "Text":
-            text = st.text_area("Enter News")
-        else:
-            url = st.text_input("Enter URL")
-            text = fetch(url)
-
-        run = st.button("Analyze")
-
-    with col2:
-        st.image("https://cdn-icons-png.flaticon.com/512/2593/2593549.png")
-
-    if run and text:
-        pred, prob = predict(text)
-
-        label = "FAKE ❌" if pred else "REAL ✅"
-        conf = max(prob)
-        sent = sentiment(text)
-
-        a,b,c = st.columns(3)
-        a.metric("Prediction", label)
-        b.metric("Confidence", f"{conf:.2f}")
-        c.metric("Sentiment", sent)
-
-        fig, ax = plt.subplots()
-        ax.bar(["Real","Fake"], prob)
-        st.pyplot(fig)
-
-        st.session_state.history.append(label)
-
-# =========================
-# DASHBOARD (WITH DATA)
-# =========================
-elif page == "📊 Dashboard":
-    st.header("📊 Dashboard")
-
-    data = st.session_state.history
-
-    if data:
-        fake = sum(1 for i in data if "FAKE" in i)
-        real = len(data) - fake
-
-        c1,c2 = st.columns(2)
-
-        with c1:
-            fig, ax = plt.subplots()
-            ax.pie([real,fake], labels=["Real","Fake"], autopct='%1.1f%%')
-            st.pyplot(fig)
-
-        with c2:
-            st.metric("Total", len(data))
-            st.metric("Fake", fake)
-            st.metric("Real", real)
-
-        # extra bar chart
-        fig2, ax2 = plt.subplots()
-        ax2.bar(["Real","Fake"], [real,fake])
-        st.pyplot(fig2)
-
-    else:
-        st.warning("Run detector first!")
-
-# =========================
-# TRENDS PAGE
-# =========================
-elif page == "📈 Trends":
-    st.header("📈 Trends Analysis")
-
-    # fake random trend data
-    days = ["Mon","Tue","Wed","Thu","Fri"]
-    values = [random.randint(1,10) for _ in days]
+    vals = [random.randint(10, 100) for _ in range(7)]
+    days = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
 
     fig, ax = plt.subplots()
-    ax.plot(days, values)
+    ax.plot(days, vals)
     st.pyplot(fig)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# =========================
-# INSIGHTS
-# =========================
-elif page == "🧠 Insights":
-    st.header("🧠 AI Insights")
-
-    txt = st.text_area("Enter text")
-    if st.button("Analyze Insights"):
-        if txt:
-            st.write("Words:", len(txt.split()))
-            st.write("Characters:", len(txt))
-            st.write("Sentiment:", sentiment(txt))
-
-# =========================
-# SETTINGS
-# =========================
-elif page == "⚙️ Settings":
-    st.header("⚙️ Settings")
-
-    if st.button("Clear History"):
-        st.session_state.history = []
-        st.success("Cleared")
-
-    if st.button("Logout"):
+    # -------- LOGOUT --------
+    if st.button("🚪 Logout"):
         st.session_state.logged_in = False
-        st.rerun()
+        st.experimental_rerun()
+
+# ---------------- RUN ----------------
+if not st.session_state.logged_in:
+    auth_page()
+else:
+    main_page()
